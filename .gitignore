@@ -1,0 +1,18 @@
+# os
+.DS_Store
+
+# log
+*.log
+
+# env
+.env
+.env.*
+!.env.example
+
+# uploads
+uploads/*
+!uploads/.gitkeep
+
+# temp
+*.tmp
+*.temp
