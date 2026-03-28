@@ -10,6 +10,12 @@ $pelapor_match_count = 0;
 
 $stats = [];
 $recent_items = [];
+$recent_matches = [];
+$match_stats = [
+    'pending' => 0,
+    'cocok' => 0,
+    'dikonfirmasi' => 0
+];
 
 if ($role === 'petugas') {
     $res1 = $conn->query('SELECT COUNT(*) as total FROM barang_temuan WHERE status = "disimpan"');
@@ -26,6 +32,32 @@ if ($role === 'petugas') {
 
     $recent_query = 'SELECT id, nama_barang, kategori, status, created_at, foto FROM barang_temuan ORDER BY created_at DESC LIMIT 5';
     $recent_items = $conn->query($recent_query);
+
+    $res5 = $conn->query('SELECT status, COUNT(*) as total FROM matching GROUP BY status');
+    if ($res5) {
+        while ($row = $res5->fetch_assoc()) {
+            if (isset($match_stats[$row['status']])) {
+                $match_stats[$row['status']] = (int) $row['total'];
+            }
+        }
+    }
+
+    $recent_match_query = '
+        SELECT m.id, m.cocok_score, m.status, m.updated_at,
+               bt.nama_barang as barang_nama,
+               lk.nama_barang as laporan_nama
+        FROM matching m
+        JOIN barang_temuan bt ON m.barang_id = bt.id
+        JOIN laporan_kehilangan lk ON m.laporan_id = lk.id
+        ORDER BY m.updated_at DESC, m.id DESC
+        LIMIT 3
+    ';
+    $res6 = $conn->query($recent_match_query);
+    if ($res6) {
+        while ($row = $res6->fetch_assoc()) {
+            $recent_matches[] = $row;
+        }
+    }
 } else {
     $stmt = safePrepare($conn, 'SELECT COUNT(*) as total FROM laporan_kehilangan WHERE created_by = ?');
     $stmt->bind_param('i', $user['id']);
@@ -54,6 +86,42 @@ if ($role === 'petugas') {
     $stmt->bind_param('i', $user['id']);
     $stmt->execute();
     $recent_items = $stmt->get_result();
+
+    $stmt = safePrepare($conn, '
+        SELECT m.status, COUNT(*) as total
+        FROM matching m
+        JOIN laporan_kehilangan lk ON m.laporan_id = lk.id
+        WHERE lk.created_by = ?
+        GROUP BY m.status
+    ');
+    $stmt->bind_param('i', $user['id']);
+    $stmt->execute();
+    $status_result = $stmt->get_result();
+    while ($row = $status_result->fetch_assoc()) {
+        if (isset($match_stats[$row['status']])) {
+            $match_stats[$row['status']] = (int) $row['total'];
+        }
+    }
+    $stmt->close();
+
+    $stmt = safePrepare($conn, '
+        SELECT m.id, m.cocok_score, m.status, m.updated_at,
+               bt.nama_barang as barang_nama,
+               lk.nama_barang as laporan_nama
+        FROM matching m
+        JOIN barang_temuan bt ON m.barang_id = bt.id
+        JOIN laporan_kehilangan lk ON m.laporan_id = lk.id
+        WHERE lk.created_by = ?
+        ORDER BY m.updated_at DESC, m.id DESC
+        LIMIT 3
+    ');
+    $stmt->bind_param('i', $user['id']);
+    $stmt->execute();
+    $match_result = $stmt->get_result();
+    while ($row = $match_result->fetch_assoc()) {
+        $recent_matches[] = $row;
+    }
+    $stmt->close();
 }
 ?>
 <!DOCTYPE html>
@@ -440,20 +508,37 @@ if ($role === 'petugas') {
             <div class="col-xl-4">
                 <div class="content-card">
                     <h5 class="fw-800 mb-4">Kecocokan Baru ✨</h5>
-                    
-                    <?php if($role === 'pelapor' && $stats['kecocokan'] > 0): ?>
-                    <div class="match-item p-3 rounded-4 mb-3 border" style="background: #f5f3ff; border-color: rgba(139,92,246,0.1) !important;">
-                        <div class="d-flex gap-3">
-                            <div class="bg-white p-2 rounded-3 shadow-sm" style="height: fit-content;">
-                                <i data-lucide="zap" width="20" class="text-warning"></i>
+
+                    <?php if (!empty($recent_matches)): ?>
+                        <?php foreach ($recent_matches as $match): ?>
+                            <?php
+                                $match_status = strtolower((string) ($match['status'] ?? 'pending'));
+                                $match_status_class = 'pill-info';
+                                if ($match_status === 'pending') {
+                                    $match_status_class = 'pill-warning';
+                                } elseif ($match_status === 'cocok' || $match_status === 'dikonfirmasi') {
+                                    $match_status_class = 'pill-success';
+                                } elseif ($match_status === 'tidak_cocok') {
+                                    $match_status_class = 'pill-danger';
+                                }
+                            ?>
+                            <div class="match-item p-3 rounded-4 mb-3 border" style="background: #f5f3ff; border-color: rgba(139,92,246,0.1) !important;">
+                                <div class="d-flex gap-3">
+                                    <div class="bg-white p-2 rounded-3 shadow-sm" style="height: fit-content;">
+                                        <i data-lucide="zap" width="20" class="text-warning"></i>
+                                    </div>
+                                    <div class="w-100">
+                                        <h6 class="mb-1 fw-700" style="font-size: 0.92rem;"><?= htmlspecialchars($match['barang_nama']) ?></h6>
+                                        <p class="small text-slate mb-2">↔ <?= htmlspecialchars($match['laporan_nama']) ?></p>
+                                        <div class="d-flex align-items-center justify-content-between gap-2">
+                                            <span class="status-pill <?= $match_status_class ?>"><?= ucfirst($match_status) ?></span>
+                                            <span class="small fw-700" style="color: var(--primary-purple);"><?= (int) ($match['cocok_score'] ?? 0) ?>%</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                            <div>
-                                <h6 class="mb-0 fw-700">Ada kecocokan!</h6>
-                                <p class="small text-slate mb-2">Seseorang menemukan barang yang mirip dengan milik Anda.</p>
-                                <a href="../matching/index.php" class="btn btn-primary-custom btn-sm w-100 py-2 text-decoration-none">Verifikasi</a>
-                            </div>
-                        </div>
-                    </div>
+                        <?php endforeach; ?>
+                        <a href="../matching/index.php" class="btn btn-primary-custom btn-sm w-100 py-2 text-decoration-none">Buka Daftar Kecocokan</a>
                     <?php else: ?>
                     <div class="p-3 bg-light rounded-4 text-center mb-3">
                         <i data-lucide="search" class="text-slate mb-2" width="24" style="opacity: 0.5;"></i>
@@ -462,12 +547,26 @@ if ($role === 'petugas') {
                     <?php endif; ?>
 
                     <div class="border-top mt-4 pt-4">
-                        <h6 class="fw-700 mb-3" style="font-size: 0.9rem;">Aktivitas Terkini</h6>
+                        <h6 class="fw-700 mb-3" style="font-size: 0.9rem;">Statistik Kecocokan</h6>
                         <div class="d-flex gap-3 mb-3">
-                            <div class="bg-light p-2 rounded-circle" style="height: fit-content;"><i data-lucide="message-square" width="14"></i></div>
+                            <div class="bg-light p-2 rounded-circle" style="height: fit-content;"><i data-lucide="clock-3" width="14"></i></div>
                             <div>
-                                <p class="small mb-0">System: Welcome to TemuBalik!</p>
-                                <span class="text-slate" style="font-size: 0.7rem;">Baru saja</span>
+                                <p class="small mb-0">Pending: <?= (int) $match_stats['pending'] ?> data</p>
+                                <span class="text-slate" style="font-size: 0.7rem;">Menunggu tindak lanjut</span>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-3 mb-3">
+                            <div class="bg-light p-2 rounded-circle" style="height: fit-content;"><i data-lucide="check" width="14"></i></div>
+                            <div>
+                                <p class="small mb-0">Cocok: <?= (int) $match_stats['cocok'] ?> data</p>
+                                <span class="text-slate" style="font-size: 0.7rem;">Perlu verifikasi lanjutan</span>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-3">
+                            <div class="bg-light p-2 rounded-circle" style="height: fit-content;"><i data-lucide="badge-check" width="14"></i></div>
+                            <div>
+                                <p class="small mb-0">Dikonfirmasi: <?= (int) $match_stats['dikonfirmasi'] ?> data</p>
+                                <span class="text-slate" style="font-size: 0.7rem;">Siap/sudah proses serah</span>
                             </div>
                         </div>
                     </div>

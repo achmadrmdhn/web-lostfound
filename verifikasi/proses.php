@@ -90,9 +90,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 if ($stmt->execute()) {
                     if ($status === 'diserahkan') {
-                        $conn->query('UPDATE matching SET status = "dikonfirmasi" WHERE id = ' . $penyerahan['matching_id']);
-                        $conn->query('UPDATE barang_temuan SET status = "diserahkan" WHERE id IN (SELECT barang_id FROM matching WHERE id = ' . $penyerahan['matching_id'] . ')');
-                        $conn->query('UPDATE laporan_kehilangan SET status = "diserahkan" WHERE id IN (SELECT laporan_id FROM matching WHERE id = ' . $penyerahan['matching_id'] . ')');
+                        $conn->query('UPDATE matching SET status = "dikonfirmasi" WHERE id = ' . $matching_id);
+                        $conn->query('UPDATE barang_temuan SET status = "diserahkan" WHERE id IN (SELECT barang_id FROM matching WHERE id = ' . $matching_id . ')');
+                        $conn->query('UPDATE laporan_kehilangan SET status = "diserahkan" WHERE id IN (SELECT laporan_id FROM matching WHERE id = ' . $matching_id . ')');
                     }
                     header('Location: index.php?crud_status=success&crud_action=update');
                     exit;
@@ -125,14 +125,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$matching_result = $conn->query('
+$current_matching_id = $edit_mode && $penyerahan ? (int) $penyerahan['matching_id'] : 0;
+
+$matching_sql = '
     SELECT m.*, bt.nama_barang as barang_nama, lk.nama_barang as laporan_nama
     FROM matching m
     JOIN barang_temuan bt ON m.barang_id = bt.id
     JOIN laporan_kehilangan lk ON m.laporan_id = lk.id
-    WHERE m.status = "cocok" OR m.status = "dikonfirmasi"
-    ORDER BY m.created_at
-');
+    WHERE m.status IN ("cocok", "dikonfirmasi")';
+
+if ($current_matching_id > 0) {
+    $matching_sql .= ' OR m.id = ' . $current_matching_id;
+}
+
+$matching_sql .= ' ORDER BY m.created_at';
+$matching_result = $conn->query($matching_sql);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -419,11 +426,11 @@ $matching_result = $conn->query('
             <form method="POST" enctype="multipart/form-data">
                 <div class="form-group">
                     <label class="form-label">Pencocokan <span class="required-indicator">*</span></label>
-                    <select class="form-select" name="matching_id" <?= $edit_mode ? 'disabled' : 'required' ?>>
+                    <select class="form-select" name="matching_id" required>
                         <option value="">Pilih Pencocokan</option>
                         <?php
                         while ($m = $matching_result->fetch_assoc()) {
-                            $selected = ($edit_mode && $penyerahan['matching_id'] === $m['id']) ? 'selected' : '';
+                            $selected = ($edit_mode && (int) $penyerahan['matching_id'] === (int) $m['id']) ? 'selected' : '';
                             echo '<option value="' . $m['id'] . '" ' . $selected . '>';
                             echo htmlspecialchars($m['barang_nama']) . ' ↔ ' . htmlspecialchars($m['laporan_nama']);
                             echo '</option>';
